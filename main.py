@@ -14,7 +14,7 @@ for p in [MOD_PATH, Path("downloads"), Path("data")]: p.mkdir(exist_ok=True)
 def setup_wizard():
     api_id = os.getenv("API_ID")
     api_hash = os.getenv("API_HASH")
-    bot_token = os.getenv("BOT_TOKEN") # Токен для кнопок
+    bot_token = os.getenv("BOT_TOKEN")
     if not api_id or not api_hash or not bot_token:
         print("\n🔧 ПЕРВИЧНАЯ НАСТРОЙКА KOLI")
         api_id = input("Введите API ID: ").strip()
@@ -27,9 +27,13 @@ def setup_wizard():
 
 API_ID, API_HASH, BOT_TOKEN = setup_wizard()
 
-# Клиент юзербота и клиент бота для кнопок
-client = TelegramClient('koli_user', API_ID, API_HASH)
-bot = TelegramClient('koli_bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+# Создаем цикл событий ОДИН раз
+loop = asyncio.get_event_loop()
+
+# Клиенты
+client = TelegramClient('koli_user', API_ID, API_HASH, loop=loop)
+bot = TelegramClient('koli_bot', API_ID, API_HASH, loop=loop)
+
 START_TIME = time.time()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
@@ -38,7 +42,7 @@ async def get_ping():
     await client.get_me()
     return f"{(datetime.now() - t1).microseconds / 1000:.2f}"
 
-# --- ОБРАБОТЧИК КОМАНД ЮЗЕРБОТА ---
+# --- ОБРАБОТЧИК ЮЗЕРБОТА ---
 @client.on(events.NewMessage(outgoing=True))
 async def koli_handler(event):
     pref = db.get("prefix") or "."
@@ -49,52 +53,29 @@ async def koli_handler(event):
     cmd = parts[0].lower()
     args = parts[1] if len(parts) > 1 else ""
 
-    # 1. ПИНГ
     if cmd in ["пинг", "ping"]:
         p = await get_ping()
         await event.edit(f"<b>🚀 Понг!</b>\n<code>{p} ms</code>", parse_mode='html')
 
-    # 2. ИНФО
     elif cmd == "инфо":
         uptime = str(datetime.now() - datetime.fromtimestamp(START_TIME)).split('.')[0]
         ram = psutil.virtual_memory().percent
         p = await get_ping()
-        await event.edit(
-            f"<b>🪐 KoliUserbot</b>\n\n"
-            f"⏱ <b>Uptime:</b> <code>{uptime}</code>\n"
-            f"📡 <b>Ping:</b> <code>{p} ms</code>\n"
-            f"📊 <b>RAM:</b> <code>{ram}%</code>", parse_mode='html'
-        )
+        await event.edit(f"<b>🪐 KoliUserbot</b>\n\n⏱ <b>Uptime:</b> <code>{uptime}</code>\n📡 <b>Ping:</b> <code>{p} ms</code>\n📊 <b>RAM:</b> <code>{ram}%</code>", parse_mode='html')
 
-    # 3. ХЕЛП
-    elif cmd == "хелп":
-        await event.edit(
-            f"<b>❓ Список команд:</b>\n"
-            f"<code>{pref}пинг</code>, <code>{pref}инфо</code>, "
-            f"<code>{pref}конфиг</code>, <code>{pref}restart</code>, "
-            f"<code>{pref}обнова</code>", parse_mode='html'
-        )
-
-    # 4. КОНФИГ (МЕНЮ С КНОПКАМИ КАК НА ФОТО)
     elif cmd == "конфиг":
-        # Используем инлайн-запрос через бота-помощника
-        bot_user = await bot.get_me()
-        results = await client.inline_query(bot_user.username, "main_config")
+        # Исправленный вызов инлайна
+        bot_me = await bot.get_me()
+        results = await client.inline_query(bot_me.username, "main_config")
         await results[0].click(event.chat_id)
         await event.delete()
 
-    # 5. СИСТЕМНЫЕ
     elif cmd == "restart":
         await event.edit("<b>⏳ Рестарт...</b>", parse_mode='html')
         db.set_temp("restart_chat", event.chat_id)
         os.execl(sys.executable, sys.executable, *sys.argv)
 
-    elif cmd == "обнова":
-        await event.edit("<b>🔄 Обновление...</b>", parse_mode='html')
-        subprocess.check_output(["git", "pull"])
-        os.execl(sys.executable, sys.executable, *sys.argv)
-
-# --- ЛОГИКА КНОПОК (ИНЛАЙН МЕНЮ) ---
+# --- ЛОГИКА КНОПОК (ИНЛАЙН) ---
 @bot.on(events.InlineQuery)
 async def inline_handler(event):
     if event.query.query == "main_config":
@@ -104,29 +85,28 @@ async def inline_handler(event):
             [Button.inline("Внешние 🛸", data="cfg_mods")],
             [Button.inline("Закрыть 🔻", data="cfg_close")]
         ]
-        await event.answer([builder.article(
-            "Настройки", 
-            text="⚙️ **Выберите категорию для настройки**", 
-            buttons=buttons
-        )])
+        await event.answer([builder.article("Настройки", text="⚙️ **Выберите категорию для настройки**", buttons=buttons)])
 
 @bot.on(events.CallbackQuery)
 async def callback_handler(event):
     if event.data == b"cfg_close":
         await event.edit("<b>❌ Меню закрыто</b>", parse_mode='html')
     elif event.data == b"cfg_core":
-        await event.edit("<b>🛰 Настройки ядра:</b>\n\nЗдесь будет выбор префикса и эмодзи", 
-                         buttons=[Button.inline("⬅️ Назад", data="main_config")])
+        await event.edit("<b>🛰 Настройки ядра:</b>\n\nЗдесь будет выбор префикса и эмодзи", buttons=[Button.inline("⬅️ Назад", data="main_config")])
 
 # --- ЗАПУСК ---
-async def start_koli():
+async def start_everything():
     await client.start()
+    await bot.start(bot_token=BOT_TOKEN)
+    
     chat_id = db.get_temp("restart_chat")
     if chat_id:
-        await client.send_message(int(chat_id), "<b>✅ Бот онлайн!</b>", parse_mode='html')
+        try: await client.send_message(int(chat_id), "<b>✅ Бот онлайн!</b>", parse_mode='html')
+        except: pass
         db.del_temp("restart_chat")
+        
     print("🚀 Бот запущен!")
-    await client.run_until_disconnected()
+    await asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected())
 
 if __name__ == "__main__":
-    asyncio.run(start_koli())
+    loop.run_until_complete(start_everything())

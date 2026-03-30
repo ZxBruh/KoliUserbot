@@ -1,157 +1,73 @@
-import os
-import sys
-import time
-import asyncio
-import platform
-import psutil
-import subprocess
-import importlib.util
+import os, sys, time, asyncio, platform, psutil, subprocess, importlib.util
 from pathlib import Path
-from datetime import datetime
-
-# Telegram библиотеки
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError
 from database import db
 from dotenv import load_dotenv, set_key
 
-# --- 1. АВТО-ЗАЩИТА (.gitignore) ---
-def create_gitignore():
-    path = Path(".gitignore")
-    if not path.exists():
-        content = ".env\n*.session\n*.session-journal\n*.db\n__pycache__/\ndownloads/\n"
-        with open(path, "w") as f:
-            f.write(content)
-        print("🛡 .gitignore создан (ваши данные защищены).")
-
-create_gitignore()
-
-# --- 2. МАСТЕР НАСТРОЙКИ ---
+# --- Инициализация папок ---
 env_path = Path(".env")
 load_dotenv(dotenv_path=env_path)
+MOD_PATH = Path("modules/")
+for folder in [MOD_PATH, Path("downloads"), Path("data")]: folder.mkdir(exist_ok=True)
 
 def setup_wizard():
     api_id = os.getenv("API_ID")
     api_hash = os.getenv("API_HASH")
-    bot_token = os.getenv("BOT_TOKEN")
-
     if not api_id or not api_hash:
-        print("\n🔧 --- ПЕРВИЧНАЯ НАСТРОЙКА KOLI ---")
-        api_id = input("🔢 Введите API ID: ").strip()
-        api_hash = input("✍️ Введите API HASH: ").strip()
-        bot_token = input("🤖 Введите BOT TOKEN (из @BotFather): ").strip()
+        print("\n🔧 ПЕРВИЧНАЯ НАСТРОЙКА")
+        api_id = input("API ID: "); api_hash = input("API HASH: ")
+        set_key(str(env_path), "API_ID", api_id); set_key(str(env_path), "API_HASH", api_hash)
+    return int(api_id), api_hash
 
-        if not env_path.exists(): env_path.touch()
-        set_key(str(env_path), "API_ID", api_id)
-        set_key(str(env_path), "API_HASH", api_hash)
-        set_key(str(env_path), "BOT_TOKEN", bot_token)
-        print("✅ Настройки сохранены в .env")
-        return int(api_id), api_hash, bot_token
-    return int(api_id), api_hash, bot_token
-
-API_ID, API_HASH, BOT_TOKEN = setup_wizard()
-REPO_URL = "https://github.com/zxbruh/KoliUserbot"
-
-# --- 3. ИНИЦИАЛИЗАЦИЯ ---
+API_ID, API_HASH = setup_wizard()
 client = TelegramClient('koli_user', API_ID, API_HASH)
-bot = TelegramClient('koli_bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-START_TIME = time.time()
-MOD_PATH = Path("modules/")
+# --- Загрузчик модулей ---
+def load_modules():
+    count = 0
+    for file in MOD_PATH.glob("*.py"):
+        spec = importlib.util.spec_from_file_location(file.stem, file)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if hasattr(mod, 'handler'):
+            client.add_event_handler(mod.handler)
+        count += 1
+    return count
 
-# Исправленная строка создания папок (бывшая строка 61)
-for folder in [MOD_PATH, Path("downloads"), Path("data")]: 
-    folder.mkdir(exist_ok=True)
-
-# --- 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-async def get_stats():
-    t1 = datetime.now()
-    await client.get_me()
-    ping = f"{(datetime.now() - t1).microseconds / 1000:.2f}ms"
-    uptime_sec = int(time.time() - START_TIME)
-    me = await client.get_me()
-    
-    host = "Heroku" if "DYNO" in os.environ else platform.node()
-    plat = "Cloud" if "DYNO" in os.environ else "VPS/Local"
-
-    return {
-        "{me}": f"@{me.username}" if me.username else me.first_name,
-        "{prefix}": db.get("prefix"),
-        "{platform}": plat,
-        "{uptime}": f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m",
-        "{ram_usage}": f"{psutil.virtual_memory().percent()}%",
-        "{hostname}": host,
-        "{os}": platform.system(),
-        "{ping}": ping
-    }
-
-# --- 5. АВТОРИЗАЦИЯ И РЕСТАРТ-РЕПОРТ ---
-async def start_koli():
-    await client.connect()
-    if not await client.is_user_authorized():
-        print("\n📱 Введите номер телефона прямо здесь (пример: +79991234567)")
-        phone = input("Номер: ")
-        await client.send_code_request(phone)
-        try:
-            await client.sign_in(phone, input("🔢 Код из Телеграм: "))
-        except SessionPasswordNeededError:
-            await client.sign_in(password=input("🔐 Облачный пароль: "))
-
-    c_id = db.get_temp("restart_chat")
-    m_id = db.get_temp("restart_msg")
-    if c_id and m_id:
-        try:
-            await client.edit_message(int(c_id), int(m_id), "<b>✅ KoliUserbot успешно перезапущен!</b>", parse_mode='html')
-        except: pass
-        db.del_temp("restart_chat")
-        db.del_temp("restart_msg")
-
-# --- 6. ОБРАБОТКА КОМАНД ---
+# --- Базовые команды (Рестарт и Обнова) ---
 @client.on(events.NewMessage(outgoing=True))
-async def main_handler(event):
-    prefix = db.get("prefix")
-    if not event.raw_text.startswith(prefix): return
+async def base_handler(event):
+    pref = db.get("prefix") or "."
+    if not event.raw_text.startswith(pref): return
+    cmd = event.raw_text[len(pref):].split(maxsplit=1)[0].lower()
     
-    parts = event.raw_text[len(prefix):].split(maxsplit=1)
-    cmd = parts[0].lower()
-    args = parts[1] if len(parts) > 1 else ""
-
     if cmd == "restart":
-        msg = await event.edit("<b>⏳ Перезагрузка...</b>", parse_mode='html')
-        db.set_temp("restart_chat", event.chat_id)
-        db.set_temp("restart_msg", msg.id)
+        await event.edit("<b>⏳ Перезагрузка...</b>", parse_mode='html')
+        db.set_temp("restart_chat", event.chat_id); db.set_temp("restart_msg", event.id)
         os.execl(sys.executable, sys.executable, *sys.argv)
-
+    
     elif cmd == "обнова":
-        await event.edit("<b>🔄 Проверка обновлений...</b>", parse_mode='html')
+        await event.edit("<b>🔄 Подтягиваю файлы с GitHub...</b>", parse_mode='html')
         try:
-            subprocess.check_output(["git", "pull", REPO_URL])
-            msg = await event.respond("<b>🚀 Обновление скачано! Перезапуск...</b>")
-            db.set_temp("restart_chat", event.chat_id)
-            db.set_temp("restart_msg", msg.id)
+            subprocess.check_output(["git", "pull"])
+            await event.respond("<b>🚀 Обновлено! Перезапускаюсь...</b>", parse_mode='html')
             os.execl(sys.executable, sys.executable, *sys.argv)
         except Exception as e:
-            await event.edit(f"❌ Ошибка Git: `{e}`")
+            await event.edit(f"❌ Ошибка обновления: {e}")
 
-    elif cmd == "инфо":
-        template = db.get("info_template")
-        stats = await get_stats()
-        for k, v in stats.items():
-            template = template.replace(k, str(v))
-        await event.edit(template)
+# --- Запуск ---
+async def start_bot():
+    await client.start()
+    # Проверка рестарта
+    c_id = db.get_temp("restart_chat")
+    if c_id:
+        await client.send_message(int(c_id), "<b>✅ Бот успешно запущен и обновлен!</b>", parse_mode='html')
+        db.del_temp("restart_chat")
 
-    elif cmd == "префикс" and args:
-        db.set("prefix", args)
-        await event.edit(f"✅ Новый префикс: `{args}`")
+    loaded = load_modules()
+    print(f"📦 Загружено модулей: {loaded}")
+    print("🚀 KoliUserbot запущен!")
 
-    elif cmd in ["терм", "bash"] and args:
-        proc = await asyncio.create_subprocess_shell(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = await proc.communicate()
-        await event.edit(f"<b>💻 Shell:</b>\n<code>{(out + err).decode()[:4000]}</code>", parse_mode='html')
-
-# --- ЗАПУСК ---
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_koli())
-    print("\n🚀 [Koli] Активен и готов к работе!")
-    loop.run_until_complete(asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected()))
+    client.loop.run_until_complete(start_bot())
+    client.run_until_disconnected()

@@ -58,7 +58,10 @@ bot = TelegramClient('koli_bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 START_TIME = time.time()
 MOD_PATH = Path("modules/")
-for folder in [MOD_PATH, "downloads", "data"]: folder.mkdir(exist_ok=True)
+
+# Исправленная строка создания папок (бывшая строка 61)
+for folder in [MOD_PATH, Path("downloads"), Path("data")]: 
+    folder.mkdir(exist_ok=True)
 
 # --- 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 async def get_stats():
@@ -86,7 +89,8 @@ async def get_stats():
 async def start_koli():
     await client.connect()
     if not await client.is_user_authorized():
-        phone = input("📱 Номер телефона (с +): ")
+        print("\n📱 Введите номер телефона прямо здесь (пример: +79991234567)")
+        phone = input("Номер: ")
         await client.send_code_request(phone)
         try:
             await client.sign_in(phone, input("🔢 Код из Телеграм: "))
@@ -149,5 +153,5 @@ async def main_handler(event):
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_koli())
-    print("🚀 [Koli] Активен и готов.")
+    print("\n🚀 [Koli] Активен и готов к работе!")
     loop.run_until_complete(asyncio.gather(client.run_until_disconnected(), bot.run_until_disconnected()))

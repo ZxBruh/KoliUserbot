@@ -1,4 +1,4 @@
 import time
-def get_time():
-    return time.strftime("%H:%M:%S")
-  
+
+def get_uptime(start_time):
+    return int(time.time() - start_time)

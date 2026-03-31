@@ -1,104 +1,69 @@
 import asyncio
 import os
 import sys
-import random
-import logging
+import importlib
 from telethon import TelegramClient, events
 
-# Импорты ядра
+# Подключаем твое ядро
 try:
-    from kolitl import database, loader, utils
+    from kolitl import database, loader
     import _internal
-except ImportError as e:
-    print(f"❌ Критическая ошибка импорта: {e}")
-    print("Убедитесь, что папка 'kolitl' создана и содержит __init__.py")
+except ImportError:
+    print("❌ Ошибка: Проверь папку 'kolitl' и файл '_internal.py'!")
     sys.exit(1)
-
-# Данные для маскировки (чтобы Telegram видел обычное устройство)
-SYSTEMS = [
-    ("Windows", "11", "Desktop"),
-    ("Ubuntu", "24.04", "Server"),
-    ("Android", "14", "Realme C75"),
-    ("iOS", "17.2", "iPhone 15")
-]
 
 class KoliUB:
     def __init__(self):
         self.db = database.KoliDatabase()
-        self.mod_loader = loader.ModuleLoader()
+        # Твои ключи (можно заменить на свои)
+        self.api_id = 2040
+        self.api_hash = "b18441a1ff76511093122b083c27636e"
         self.clients = []
-        self.loop = asyncio.get_event_loop()
 
     def get_sessions(self):
         return [f.replace(".session", "") for f in os.listdir(".") if f.endswith(".session")]
 
-    async def authorize(self):
-        print("\n🔑 --- РЕГИСТРАЦИЯ НОВОЙ СЕССИИ KOLI ---")
-        api_id = input("Введите API ID: ")
-        api_hash = input("Введите API HASH: ")
-        phone = input("Введите номер телефона (с +): ")
-        
-        session_name = f"koli-{phone.replace('+', '')}"
-        client = TelegramClient(session_name, int(api_id), api_hash)
-        
-        await client.start(phone=lambda: phone)
-        print(f"✅ Сессия {session_name} успешно создана!")
-        await client.disconnect()
-        return session_name
+    async def load_modules(self, client):
+        """Автоматически ищет и регистрирует команды из modules/"""
+        mod_files = [f[:-3] for f in os.listdir("modules") if f.endswith(".py")]
+        for name in mod_files:
+            try:
+                # Динамически импортируем файл
+                module = importlib.import_module(f"modules.{name}")
+                # Ищем в файле функцию-обработчик (например, ping_handler)
+                for item in dir(module):
+                    obj = getattr(module, item)
+                    if callable(obj) and hasattr(obj, "event_handler"):
+                        client.add_event_handler(obj)
+                print(f"✅ Модуль {name} подключен к чату")
+            except Exception as e:
+                print(f"⚠️ Не удалось загрузить {name}: {e}")
 
-    async def start_client(self, session_name):
-        # Используем стандартные ключи или просим ввести, если сессия новая
-        api_id = 2040 
-        api_hash = "b18441a1ff76511093122b083c27636e"
+    async def start_client(self, session):
+        client = TelegramClient(session, self.api_id, self.api_hash)
+        await client.start()
         
-        sys_name, sys_ver, device = random.choice(SYSTEMS)
+        # СТЫКОВКА: Загружаем команды в этот клиент
+        await self.load_modules(client)
         
-        client = TelegramClient(
-            session_name, 
-            api_id, 
-            api_hash,
-            system_version=sys_ver,
-            device_model=device,
-            app_version="1.0.0 Koli"
-        )
-
-        # Обработчик команд
-        @client.on(events.NewMessage(outgoing=True))
-        async def cmd_handler(event):
-            if event.raw_text.startswith("."):
-                await self.mod_loader.handle_command(event)
-
-        try:
-            await client.start()
-            self.clients.append(client)
-            print(f"📡 Аккаунт {session_name} подключен (Имитация: {sys_name})")
-        except Exception as e:
-            print(f"💥 Ошибка запуска {session_name}: {e}")
+        self.clients.append(client)
+        print(f"📡 Аккаунт {session} готов к командам!")
 
     async def run(self):
-        _internal.clear_console()
         _internal.print_banner()
-        
         self.db.setup()
-        self.mod_loader.load_all()
-
-        sessions = self.get_sessions()
         
+        sessions = self.get_sessions()
         if not sessions:
-            print("⚠️ Сессии не найдены. Требуется вход.")
-            new_s = await self.authorize()
-            sessions = [new_s]
+            print("⚠️ Сессий нет. Сначала создай .session файл!")
+            return
 
-        # Запуск всех сессий
-        for s in sessions:
-            await self.start_client(s)
-
-        print("\n🚀 KoliUB запущен. Жду команд в Telegram...")
+        await asyncio.gather(*(self.start_client(s) for s in sessions))
+        print("\n🚀 Бот запущен! Попробуй написать .пинг в Telegram.")
         await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    ub = KoliUB()
     try:
-        ub.loop.run_until_complete(ub.run())
+        asyncio.run(KoliUB().run())
     except KeyboardInterrupt:
-        print("\n🛑 KoliUB остановлен.")
+        print("\nВыключение...")

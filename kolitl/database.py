@@ -2,12 +2,13 @@ import sqlite3
 import os
 
 class KoliDatabase:
-    def __init__(self, db_path="koli_core.db"):
-        self.db_path = db_path
-        self.conn = sqlite3.connect(self.db_path)
-        self.cursor = self.conn.cursor()
+    def __init__(self, db_name="koli_data.db"):
+        self.db_name = db_name
+        self.conn = None
 
     def setup(self):
-        self.cursor.execute("CREATE TABLE IF NOT EXISTS config (key TEXT, value TEXT)")
+        self.conn = sqlite3.connect(self.db_name)
+        cursor = self.conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
         self.conn.commit()
-      
+        print("🗄 База данных Koli готова.")

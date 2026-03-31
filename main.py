@@ -1,117 +1,104 @@
-import argparse
 import asyncio
-import base64
-import binascii
-import collections
-import contextlib
-import importlib
-import json
-import logging
 import os
-import random
-import signal
-import socket
-import sqlite3
-import string
 import sys
-import typing
-import zlib
-from getpass import getpass
-from pathlib import Path
+import random
+import logging
+from telethon import TelegramClient, events
 
-# ВАЖНО: Те самые импорты, которые вызывали ошибку
-import aiohttp
+# Импорты ядра
 try:
-    import kolitl # Твоя новая папка
     from kolitl import database, loader, utils
-except ImportError:
-    print("❌ Ошибка: Папка 'kolitl' не найдена! Создай её на GitHub.")
+    import _internal
+except ImportError as e:
+    print(f"❌ Критическая ошибка импорта: {e}")
+    print("Убедитесь, что папка 'kolitl' создана и содержит __init__.py")
     sys.exit(1)
 
-# --- ГИГАНТСКИЕ СПИСКИ ИМИТАЦИИ (Маскировка Koli) ---
-LATIN_MOCK = [
-    "Amor", "Arbor", "Astra", "Aurum", "Bellum", "Caelum", "Calor", "Candor", 
-    "Carpe", "Celer", "Certo", "Cibus", "Civis", "Clemens", "Coetus", "Cogito", 
-    "Conexus", "Consilium", "Cresco", "Cura", "Cursus", "Decus", "Deus", "Dies", 
-    "Digitus", "Discipulus", "Dominus", "Donum", "Dulcis", "Durus", "Elementum", 
-    "Emendo", "Ensis", "Equus", "Espero", "Fidelis", "Fides", "Finis", "Flamma", 
-    "Flos", "Fortis", "Frater", "Fuga", "Fulgeo", "Genius", "Gloria", "Gratia", 
-    "Gravis", "Habitus", "Honor", "Hora", "Ignis", "Imago", "Imperium", "Inceptum", 
-    "Infinitus", "Ingenium", "Initium", "Intra", "Iunctus", "Iustitia", "Labor", 
-    "Laurus", "Lectus", "Legio", "Liberi", "Libertas", "Lumen", "Lux", "Magister", 
-    "Magnus", "Manus", "Memoria", "Mens", "Mors", "Mundo", "Natura", "Nexus", 
-    "Nobilis", "Nomen", "Novus", "Nox", "Oculus", "Omnis", "Opus", "Orbis", "Ordo", 
-    "Os", "Pax", "Perpetuus", "Persona", "Petra", "Pietas", "Pons", "Populus", 
-    "Potentia", "Primus", "Proelium", "Pulcher", "Purus", "Quaero", "Quies", "Ratio", 
-    "Regnum", "Sanguis", "Sapientia", "Sensus", "Serenus", "Sermo", "Signum", "Sol", 
-    "Solus", "Sors", "Spes", "Spiritus", "Stella", "Summus", "Teneo", "Terra", 
-    "Tigris", "Trans", "Tribuo", "Tristis", "Ultimus", "Unitas", "Universus", 
-    "Uterque", "Valde", "Vates", "Veritas", "Verus", "Vester", "Via", "Victoria", 
-    "Vita", "Vox", "Vultus", "Zephyrus", "Anyone", "Draher", "Hackimo", "Silvyr"
+# Данные для маскировки (чтобы Telegram видел обычное устройство)
+SYSTEMS = [
+    ("Windows", "11", "Desktop"),
+    ("Ubuntu", "24.04", "Server"),
+    ("Android", "14", "Realme C75"),
+    ("iOS", "17.2", "iPhone 15")
 ]
 
-def generate_random_system():
-    """Генерация данных системы для маскировки сессии"""
-    os_choices = [
-        ("Windows", "11"), ("Windows", "10"), ("macOS", "14.4"),
-        ("Android", "15"), ("iOS", "17.4"), ("Ubuntu", "24.04")
-    ]
-    name, ver = random.choice(os_choices)
-    return f"{name} {ver}"
-
-class KoliInstance:
-    """Главная машина KoliUB"""
+class KoliUB:
     def __init__(self):
-        self.arguments = self.parse_arguments()
-        
-        # ФИКС ДЛЯ FIRSTBYTE: Правильный запуск loop на Python 3.12
-        try:
-            self.loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-
         self.db = database.KoliDatabase()
-        self.loader = loader.ModuleLoader()
-        self._read_sessions()
+        self.mod_loader = loader.ModuleLoader()
+        self.clients = []
+        self.loop = asyncio.get_event_loop()
 
-    def parse_arguments(self):
-        parser = argparse.ArgumentParser(description="Koli Userbot Core")
-        parser.add_argument("--port", type=int, default=8080)
-        parser.add_argument("--data-root", default=os.getcwd())
-        return parser.parse_args()
+    def get_sessions(self):
+        return [f.replace(".session", "") for f in os.listdir(".") if f.endswith(".session")]
 
-    def _read_sessions(self):
-        """Поиск сессий с твоими префиксами"""
-        path = self.arguments.data_root
-        self.sessions = [
-            f for f in os.listdir(path) 
-            if (f.startswith("koli-") or f.startswith("zxbruh-")) and f.endswith(".session")
-        ]
-
-    async def main_logic(self):
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print(f"🚀 KoliUB Core v1.0 запущен на {generate_random_system()}")
-        print(f"📂 Найдено активных сессий: {len(self.sessions)}")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    async def authorize(self):
+        print("\n🔑 --- РЕГИСТРАЦИЯ НОВОЙ СЕССИИ KOLI ---")
+        api_id = input("Введите API ID: ")
+        api_hash = input("Введите API HASH: ")
+        phone = input("Введите номер телефона (с +): ")
         
-        self.db.setup() # Инициализация базы данных
-        self.loader.load_all() # Загрузка плагинов
-
-        if not self.sessions:
-            print("⚠️ Сессии не обнаружены. Пожалуйста, авторизуйтесь.")
+        session_name = f"koli-{phone.replace('+', '')}"
+        client = TelegramClient(session_name, int(api_id), api_hash)
         
-        # Бесконечный цикл для поддержания работы процесса
-        while True:
-            await asyncio.sleep(3600)
+        await client.start(phone=lambda: phone)
+        print(f"✅ Сессия {session_name} успешно создана!")
+        await client.disconnect()
+        return session_name
 
-# --- ТОЧКА ВХОДА (Запуск всей махины) ---
+    async def start_client(self, session_name):
+        # Используем стандартные ключи или просим ввести, если сессия новая
+        api_id = 2040 
+        api_hash = "b18441a1ff76511093122b083c27636e"
+        
+        sys_name, sys_ver, device = random.choice(SYSTEMS)
+        
+        client = TelegramClient(
+            session_name, 
+            api_id, 
+            api_hash,
+            system_version=sys_ver,
+            device_model=device,
+            app_version="1.0.0 Koli"
+        )
+
+        # Обработчик команд
+        @client.on(events.NewMessage(outgoing=True))
+        async def cmd_handler(event):
+            if event.raw_text.startswith("."):
+                await self.mod_loader.handle_command(event)
+
+        try:
+            await client.start()
+            self.clients.append(client)
+            print(f"📡 Аккаунт {session_name} подключен (Имитация: {sys_name})")
+        except Exception as e:
+            print(f"💥 Ошибка запуска {session_name}: {e}")
+
+    async def run(self):
+        _internal.clear_console()
+        _internal.print_banner()
+        
+        self.db.setup()
+        self.mod_loader.load_all()
+
+        sessions = self.get_sessions()
+        
+        if not sessions:
+            print("⚠️ Сессии не найдены. Требуется вход.")
+            new_s = await self.authorize()
+            sessions = [new_s]
+
+        # Запуск всех сессий
+        for s in sessions:
+            await self.start_client(s)
+
+        print("\n🚀 KoliUB запущен. Жду команд в Telegram...")
+        await asyncio.Event().wait()
+
 if __name__ == "__main__":
-    koli_machine = KoliInstance()
+    ub = KoliUB()
     try:
-        # Прямой запуск через loop, как на твоем скрине
-        koli_machine.loop.run_until_complete(koli_machine.main_logic())
+        ub.loop.run_until_complete(ub.run())
     except KeyboardInterrupt:
-        print("\n🛑 Процесс остановлен пользователем.")
-    except Exception as e:
-        logging.exception(f"💥 Критическая ошибка при запуске: {e}")
+        print("\n🛑 KoliUB остановлен.")

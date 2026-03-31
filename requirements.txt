@@ -1,5 +1,6 @@
+aiohttp
 telethon
+psutil
 python-dotenv
 requests
-psutil
-gitpython
+pillow

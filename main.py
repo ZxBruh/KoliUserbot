@@ -20,7 +20,7 @@ from getpass import getpass
 from pathlib import Path
 
 import aiohttp
-import kolitl # Заменено с herokutl
+import kolitl # Тотальная замена herokutl
 from kolitl import events
 from kolitl.errors import (
     ApiIdInvalidError,
@@ -40,7 +40,6 @@ from kolitl.tl.functions.account import GetPasswordRequest
 from kolitl.tl.functions.auth import CheckPasswordRequest
 from kolitl.tl.functions.contacts import UnblockRequest
 
-# Импорты из твоего локального пакета Koli
 from . import database, loader, utils, version
 from ._internal import print_banner, restart
 from .dispatcher import CommandDispatcher
@@ -52,12 +51,11 @@ from .tl_cache import CustomTelegramClient
 from .translations import Translator
 from .version import __version__
 
-# Попытка импорта веб-интерфейса Koli
 try:
     from .web import core
 except ImportError:
     web_available = False
-    logging.exception("Koli Web: Unable to import web components")
+    logging.exception("Koli Engine: Unable to import web components")
 else:
     web_available = True
 
@@ -71,7 +69,7 @@ BASE_PATH = Path(BASE_DIR)
 CONFIG_PATH = BASE_PATH / "config.json"
 
 # Тот самый огромный список для генерации имен (Koli Mock)
-KOLI_LATIN_MOCK = [
+LATIN_MOCK = [
     "Amor", "Arbor", "Astra", "Aurum", "Bellum", "Caelum",
     "Calor", "Candor", "Carpe", "Celer", "Certo", "Cibus",
     "Civis", "Clemens", "Coetus", "Cogito", "Conexus",
@@ -103,21 +101,83 @@ KOLI_LATIN_MOCK = [
 ]
 
 def generate_koli_app_name() -> str:
-    return " ".join(random.choices(KOLI_LATIN_MOCK, k=3))
+    return " ".join(random.choices(LATIN_MOCK, k=3))
 
-# --- ЗДЕСЬ ИДЕТ ОСТАЛЬНАЯ ЛОГИКА (Генераторы версий систем, Парсеры аргументов) ---
+def get_koli_app_name() -> str:
+    if not (app_name := get_config_key("koli_app_name")):
+        app_name = generate_koli_app_name()
+        save_config_key("koli_app_name", app_name)
+    return app_name
+
+def generate_random_system_version():
+    """Полный список ОС для маскировки сессии Koli"""
+    os_choices = [
+        ("Windows", "11"), ("Windows", "10"), ("Windows", "7"),
+        ("macOS", "14 Sonoma"), ("macOS", "13 Ventura"),
+        ("iOS", "17.4"), ("Android", "14"), ("Android", "15"),
+        ("Ubuntu", "24.04"), ("Debian", "12"), ("Arch Linux", "rolling"),
+        ("Kali Linux", "2024.1"), ("FreeBSD", "14.0"), ("MS-DOS", "6.22")
+    ]
+    os_name, os_version = random.choice(os_choices)
+    return f"{os_name} {os_version}"
+
+def run_config():
+    from . import configurator
+    return configurator.api_config(None)
+
+def get_config_key(key: str) -> typing.Union[str, bool]:
+    try:
+        return json.loads(CONFIG_PATH.read_text()).get(key, False)
+    except FileNotFoundError:
+        return False
+
+def save_config_key(key: str, value: str) -> bool:
+    try:
+        config = json.loads(CONFIG_PATH.read_text())
+    except FileNotFoundError:
+        config = {}
+    config[key] = value
+    CONFIG_PATH.write_text(json.dumps(config, indent=4))
+    return True
+
+def gen_port(cfg: str = "port", no8080: bool = False) -> int:
+    if "DOCKER" in os.environ and not no8080:
+        return 8080
+    if port := get_config_key(cfg):
+        return port
+    while port := random.randint(1024, 65536):
+        if socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(("localhost", port)):
+            break
+    return port
+
+class SuperList(list):
+    def __getattribute__(self, attr: str) -> typing.Any:
+        if hasattr(list, attr):
+            return list.__getattribute__(self, attr)
+        for obj in self:
+            attribute = getattr(obj, attr)
+            if callable(attribute):
+                if asyncio.iscoroutinefunction(attribute):
+                    async def foobar(*args, **kwargs):
+                        return [await getattr(_, attr)(*args, **kwargs) for _ in self]
+                    return foobar
+                return lambda *args, **kwargs: [getattr(_, attr)(*args, **kwargs) for _ in self]
+            return [getattr(x, attr) for x in self]
 
 class KoliInstance:
-    """Основной класс Koli Userbot, полностью заменяющий Heroku"""
+    """Главный класс Koli Userbot"""
     def __init__(self):
         global BASE_DIR, BASE_PATH, CONFIG_PATH
         self.omit_log = False
         self.arguments = self.parse_arguments()
-        
         if self.arguments.no_git:
             os.environ["KOLI_NO_GIT"] = "1"
-            
-        # Исправляем проблему с Event Loop со скрина 2597.jpg
+        if self.arguments.data_root:
+            BASE_DIR = self.arguments.data_root
+            BASE_PATH = Path(BASE_DIR)
+            CONFIG_PATH = BASE_PATH / "config.json"
+        
+        # Исправляем ошибку asyncio loop со скрина
         try:
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -130,33 +190,58 @@ class KoliInstance:
         self._get_api_token()
         self._get_proxy()
 
+    def parse_arguments(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--port", dest="port", default=gen_port(), type=int)
+        parser.add_argument("--phone", "-p", action="append")
+        parser.add_argument("--no-web", dest="disable_web", action="store_true")
+        parser.add_argument("--no-git", dest="no_git", action="store_true")
+        parser.add_argument("--data-root", dest="data_root", default="")
+        return parser.parse_args()
+
     def _read_sessions(self):
-        """Чтение сессий Koli из директории data"""
-        self.sessions = []
-        self.sessions += [
-            SQLiteSession(os.path.join(BASE_DIR, s.rsplit(".session", 1)[0]))
-            for s in filter(
-                lambda f: f.startswith("koli-") or f.startswith("zxbruh-") and f.endswith(".session"),
-                os.listdir(BASE_DIR),
-            )
+        """Парсинг только сессий Koli"""
+        self.sessions = [
+            SQLiteSession(os.path.join(BASE_DIR, f.rsplit(".session", 1)[0]))
+            for f in os.listdir(BASE_DIR)
+            if (f.startswith("koli-") or f.startswith("zxbruh-")) and f.endswith(".session")
         ]
 
-    # ... (Весь остальной объемный код: логика QR-входа, 2FA, патчеры безопасности) ...
+    def _get_api_token(self):
+        api_token_type = collections.namedtuple("api_token", ("ID", "HASH"))
+        try:
+            api_token = api_token_type(get_config_key("api_id"), get_config_key("api_hash"))
+        except Exception:
+            api_token = None
+        self.api_token = api_token
+
+    def _get_proxy(self):
+        self.proxy, self.conn = None, ConnectionTcpFull
 
     async def save_client_session(self, client: CustomTelegramClient, *, delay_restart: bool = False):
-        # Логика сохранения сессии с брендингом koli-
-        telegram_id = (await client.get_me()).id
+        """Логика сохранения сессии с брендингом koli-"""
+        me = await client.get_me()
+        telegram_id = me.id
         session_name = f"koli-{telegram_id}"
         
         session = SQLiteSession(os.path.join(BASE_DIR, session_name))
-        # (Копирование ключей и адресов DC)
+        session.set_dc(client.session.dc_id, client.session.server_address, client.session.port)
+        session.auth_key = client.session.auth_key
         session.save()
+
+        if not delay_restart:
+            client.disconnect()
+            restart()
         
         print(f"✅ Сессия Koli успешно сохранена как {session_name}")
 
-# --- ТОЧКА ВХОДА ---
+    async def main_logic(self):
+        print_banner()
+        print(f"🚀 Запуск огромной машины Koli на {generate_random_system_version()}...")
+        # (Весь остальной объем логики авторизации и работы)
+        await asyncio.gather(*[c.run_until_disconnected() for c in self.clients])
+
 if __name__ == "__main__":
-    # Запуск огромной машины Koli
     koli_machine = KoliInstance()
-    # Фикс для Firstbyte
+    # Тот самый фикс для Firstbyte
     koli_machine.loop.run_until_complete(koli_machine.main_logic())

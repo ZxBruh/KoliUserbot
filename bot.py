@@ -11,7 +11,7 @@ import os
 import time
 import subprocess
 from datetime import datetime
-from telethon import TelegramClient, events, errors
+from telethon import TelegramClient, errors
 from telethon.sessions import StringSession
 from telethon.tl.types import Message
 
@@ -43,68 +43,83 @@ class KoliBot:
         if SESSION_STRING:
             logger.info("🔑 Использование SESSION_STRING")
             self.client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-        else:
-            logger.info("📁 Использование файла сессии")
-            self.client = TelegramClient("koli_session", API_ID, API_HASH)
-        
-        await self.client.start()
-        
-        # Проверка авторизации
-        try:
-            self.user = await self.client.get_me()
-            logger.info(f"✅ Авторизован: {self.user.first_name} (@{self.user.username})")
-            logger.info(f"🆔 ID: {self.user.id}")
-            
-            # Проверка владельца
-            if self.owner:
-                try:
-                    owner = await self.client.get_entity(self.owner)
-                    logger.info(f"👑 Владелец: {owner.first_name}")
-                except:
-                    logger.warning("⚠️ Владелец не найден, проверьте OWNER_ID")
-                    
-        except errors.RPCError as e:
-            logger.error(f"❌ Ошибка авторизации: {e}")
-            await self.create_session()
-    
-    async def create_session(self):
-        """Создание новой сессии"""
-        print("\n" + "="*60)
-        print("🆕 СОЗДАНИЕ НОВОЙ СЕССИИ KOLIUB")
-        print("="*60)
-        
-        phone = input("📱 Введите номер телефона (+79991234567): ")
-        
-        try:
-            await self.client.send_code_request(phone)
-            code = input("🔐 Введите код из Telegram: ")
+            await self.client.start()
             
             try:
+                self.user = await self.client.get_me()
+                logger.info(f"✅ Авторизован: {self.user.first_name} (@{self.user.username})")
+                return
+            except Exception as e:
+                logger.error(f"❌ Невалидная SESSION_STRING: {e}")
+                logger.info("🔄 Создаем новую сессию...")
+        
+        # Если нет сессии или она невалидна
+        logger.info("📁 Создание новой сессии")
+        self.client = TelegramClient("koli_session", API_ID, API_HASH)
+        
+        # Запрашиваем номер телефона
+        print("\n" + "="*50)
+        print("🔐 АВТОРИЗАЦИЯ В TELEGRAM")
+        print("="*50)
+        print("Для авторизации вам потребуется:")
+        print("1. Номер телефона")
+        print("2. Код из Telegram")
+        print("3. Пароль 2FA (если включен)")
+        print("="*50)
+        
+        phone = input("\n📱 Введите номер телефона (в формате +79991234567): ").strip()
+        
+        try:
+            # Отправляем запрос на код
+            await self.client.send_code_request(phone)
+            print("✅ Код отправлен в Telegram")
+            
+            # Запрашиваем код
+            code = input("🔐 Введите код из Telegram: ").strip()
+            
+            # Пытаемся войти
+            try:
                 await self.client.sign_in(phone, code)
+                logger.info("✅ Авторизация успешна!")
+                
             except errors.SessionPasswordNeededError:
-                password = input("🔒 Введите облачный пароль (2FA): ")
+                # Если требуется облачный пароль (2FA)
+                print("\n🔒 Требуется облачный пароль (2FA)")
+                password = input("🔒 Введите пароль: ").strip()
                 await self.client.sign_in(password=password)
+                logger.info("✅ Авторизация с 2FA успешна!")
             
+            # Получаем информацию о пользователе
             self.user = await self.client.get_me()
-            logger.info(f"✅ Добро пожаловать, {self.user.first_name}!")
+            logger.info(f"👤 Добро пожаловать, {self.user.first_name}!")
             
-            # Показываем SESSION_STRING
+            # Сохраняем SESSION_STRING
             session_str = self.client.session.save()
             print("\n" + "="*60)
-            print("📝 СОХРАНИТЕ ЭТУ СТРОКУ В .env:")
+            print("📝 СОХРАНИТЕ ЭТУ СТРОКУ:")
             print("="*60)
-            print(f"\033[92mSESSION_STRING={session_str}\033[0m")
+            print(f"\033[92m{session_str}\033[0m")
             print("="*60)
+            print("💾 Добавьте её в .env файл:")
+            print(f"SESSION_STRING={session_str}")
             print(f"🔗 Репозиторий: {self.repo_url}")
-            print("💾 Добавьте в .env и перезапустите бота")
             
             # Автосохранение
             save = input("\n💾 Автосохранить в .env? (y/n): ").lower()
             if save == 'y':
                 self.save_session(session_str)
-                
+            
+        except errors.PhoneCodeInvalidError:
+            logger.error("❌ Неверный код подтверждения")
+            sys.exit(1)
+        except errors.PhoneCodeExpiredError:
+            logger.error("❌ Код истек, запросите новый")
+            sys.exit(1)
+        except errors.FloodWaitError as e:
+            logger.error(f"❌ Слишком много попыток. Подождите {e.seconds} секунд")
+            sys.exit(1)
         except Exception as e:
-            logger.error(f"❌ Ошибка: {e}")
+            logger.error(f"❌ Ошибка авторизации: {e}")
             sys.exit(1)
     
     def save_session(self, session_string):
@@ -218,91 +233,4 @@ class KoliBot:
 git clone {self.repo_url}
 cd KoliUserbot
 pip install -r requirements.txt
-python main.py """)
-
-
-@self.client.on(events.NewMessage(pattern=f'^{self.prefix}обнова$'))
-async def check_update_cmd(event):
-    if event.sender_id != self.owner:
-        return
-    msg = await event.reply(f"{CFG_EMOJI} 🔄 Проверка обновлений...")
-    
-    try:
-        result = subprocess.run(["git", "fetch", "--dry-run"], 
-                               capture_output=True, text=True, cwd=os.path.dirname(__file__))
-        
-        if result.stdout:
-            await msg.edit(f"{CFG_EMOJI} 📦 Доступны обновления!\nВыполните `{self.prefix}обновить`")
-        else:
-            await msg.edit(f"{CFG_EMOJI} ✅ У вас последняя версия KoliUB v{self.version}")
-    except Exception as e:
-        await msg.edit(f"{CFG_EMOJI} ❌ Ошибка: {e}")
-
-@self.client.on(events.NewMessage(pattern=f'^{self.prefix}обновить$'))
-async def git_update_cmd(event):
-    if event.sender_id != self.owner:
-        return
-    msg = await event.reply(f"{CFG_EMOJI} 🔄 Обновление KoliUB...")
-    
-    try:
-        result = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=os.path.dirname(__file__))
-        await msg.edit(f"{CFG_EMOJI} ✅ Обновление завершено!\n```\n{result.stdout[:500]}\n```\n🔄 Перезапустите: `{self.prefix}рестарт`")
-    except Exception as e:
-        await msg.edit(f"{CFG_EMOJI} ❌ Ошибка: {e}")
-
-@self.client.on(events.NewMessage(pattern=f'^{self.prefix}логи$'))
-async def logs_cmd(event):
-    if event.sender_id != self.owner:
-        return
-    
-    if os.path.exists("koli.log"):
-        with open("koli.log", "r", encoding='utf-8') as f:
-            logs = f.read()[-3000:]
-        await event.reply(f"**📋 Последние логи:**\n```\n{logs}\n```")
-    else:
-        await event.reply("❌ Лог-файл не найден")
-
-@self.client.on(events.NewMessage(pattern=f'^{self.prefix}очислг$'))
-async def clear_logs_cmd(event):
-    if event.sender_id != self.owner:
-        return
-    
-    if os.path.exists("koli.log"):
-        with open("koli.log", "w") as f:
-            f.write("")
-        await event.reply(f"{CFG_EMOJI} ✅ Логи очищены")
-    else:
-        await event.reply("❌ Лог-файл не найден")
-
-@self.client.on(events.NewMessage(pattern=f'^{self.prefix}терм(?: |$)(.*)'))
-async def terminal_cmd(event):
-    if event.sender_id != self.owner:
-        return
-    
-    cmd = event.pattern_match.group(1).strip()
-    if not cmd:
-        await event.reply(f"❌ Укажите команду\nПример: `{self.prefix}терм ls -la`")
-        return
-    
-    msg = await event.reply(f"{CFG_EMOJI} Выполнение: `{cmd}`...")
-    
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-        output = result.stdout if result.stdout else result.stderr
-        if not output:
-            output = "✅ Выполнено (нет вывода)"
-        
-        if len(output) > 4000:
-            output = output[:4000] + "\n... (обрезано)"
-        
-        await msg.edit(f"**💻 Выполнено:**\n```bash\n{output}\n```")
-    except subprocess.TimeoutExpired:
-        await msg.edit(f"{CFG_EMOJI} ⏰ Команда превысила лимит времени (30 сек)")
-    except Exception as e:
-        await msg.edit(f"{CFG_EMOJI} ❌ Ошибка: {e}")
-
-@self.client.on(events.NewMessage(pattern=f'^{self.prefix}термстп$'))
-async def terminate_cmd(event):
-    if event.sender_id != self.owner:
-        return
-    await event
+python3 main.py

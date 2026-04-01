@@ -1,8 +1,15 @@
+"""
+KoliUB - Основной класс бота
+GitHub: github.com/zxbruh/KoliUserbot
+Author: @zxbruh
+"""
+
 import asyncio
 import logging
 import sys
 import os
 import time
+import subprocess
 from datetime import datetime
 from telethon import TelegramClient, events, errors
 from telethon.sessions import StringSession
@@ -12,11 +19,12 @@ from config import *
 from database import Database
 from commands import register_commands
 from menus import register_menus
-from web import start_web_server
 
 logger = logging.getLogger(__name__)
 
 class KoliBot:
+    """Основной класс KoliUB"""
+    
     def __init__(self):
         self.client = None
         self.db = Database()
@@ -24,6 +32,9 @@ class KoliBot:
         self.prefix = PREFIX
         self.owner = OWNER_ID
         self.user = None
+        self.version = KOLI_VERSION
+        self.repo_url = REPO_URL
+        self.loaded_modules = {}
         
     async def start(self):
         """Автоматическая авторизация"""
@@ -58,20 +69,20 @@ class KoliBot:
     
     async def create_session(self):
         """Создание новой сессии"""
-        print("\n" + "="*50)
-        print("🆕 СОЗДАНИЕ НОВОЙ СЕССИИ")
-        print("="*50)
+        print("\n" + "="*60)
+        print("🆕 СОЗДАНИЕ НОВОЙ СЕССИИ KOLIUB")
+        print("="*60)
         
-        phone = input("📱 Номер телефона (+79991234567): ")
+        phone = input("📱 Введите номер телефона (+79991234567): ")
         
         try:
             await self.client.send_code_request(phone)
-            code = input("🔐 Код из Telegram: ")
+            code = input("🔐 Введите код из Telegram: ")
             
             try:
                 await self.client.sign_in(phone, code)
             except errors.SessionPasswordNeededError:
-                password = input("🔒 Облачный пароль (2FA): ")
+                password = input("🔒 Введите облачный пароль (2FA): ")
                 await self.client.sign_in(password=password)
             
             self.user = await self.client.get_me()
@@ -79,13 +90,13 @@ class KoliBot:
             
             # Показываем SESSION_STRING
             session_str = self.client.session.save()
-            print("\n" + "="*50)
-            print("📝 СОХРАНИТЕ ЭТУ СТРОКУ:")
-            print("="*50)
-            print(f"\033[92m{session_str}\033[0m")
-            print("="*50)
-            print("💾 Добавьте её в .env как SESSION_STRING")
-            print(f"🔗 Репозиторий: {REPO_URL}")
+            print("\n" + "="*60)
+            print("📝 СОХРАНИТЕ ЭТУ СТРОКУ В .env:")
+            print("="*60)
+            print(f"\033[92mSESSION_STRING={session_str}\033[0m")
+            print("="*60)
+            print(f"🔗 Репозиторий: {self.repo_url}")
+            print("💾 Добавьте в .env и перезапустите бота")
             
             # Автосохранение
             save = input("\n💾 Автосохранить в .env? (y/n): ").lower()
@@ -126,11 +137,8 @@ class KoliBot:
         """Запуск бота"""
         await self.load_handlers()
         
-        # Запуск веб-сервера для статуса
-        if DEPLOY_PLATFORM != "local":
-            start_web_server()
+        # ========== ВСТРОЕННЫЕ КОМАНДЫ ==========
         
-        # Команда ping
         @self.client.on(events.NewMessage(pattern=f'^{self.prefix}пинг$'))
         async def ping_cmd(event):
             if event.sender_id != self.owner:
@@ -140,7 +148,6 @@ class KoliBot:
             end = time.time()
             await msg.edit(f"🏓 Понг! `{round((end-start)*1000)}ms`")
         
-        # Команда статус
         @self.client.on(events.NewMessage(pattern=f'^{self.prefix}статус$'))
         async def status_cmd(event):
             if event.sender_id != self.owner:
@@ -152,21 +159,21 @@ class KoliBot:
             minutes = (uptime.seconds % 3600) // 60
             
             status = f"""
-{CFG_EMOJI} **KoliUB v{KOLI_VERSION}**
+{CFG_EMOJI} **KoliUB v{self.version}**
 
 👤 **Аккаунт:** {self.user.first_name}
 🆔 **ID:** `{self.user.id}`
 🔧 **Префикс:** `{self.prefix}`
 ⏱️ **Аптайм:** {days}д {hours}ч {minutes}м
 💾 **БД:** {len(self.db.all_settings())} записей
-📦 **Модулей:** встроенных 19
+📦 **Модулей:** {len(self.loaded_modules)} загружено
 
-🔗 **GitHub:** [KoliUserbot]({REPO_URL})
+🔗 **GitHub:** [KoliUserbot]({self.repo_url})
 👑 **Автор:** {AUTHOR}
+⭐ **Star** если нравится!
             """
             await event.reply(status)
         
-        # Команда сессия
         @self.client.on(events.NewMessage(pattern=f'^{self.prefix}сессия$'))
         async def session_cmd(event):
             if event.sender_id != self.owner:
@@ -183,20 +190,18 @@ class KoliBot:
 `{session_str[:50]}...`
 
 💾 Сохраните в .env
-🔗 {REPO_URL}
+🔗 {self.repo_url}
             """)
         
-        # Команда рестарт
         @self.client.on(events.NewMessage(pattern=f'^{self.prefix}рестарт$'))
         async def restart_cmd(event):
             if event.sender_id != self.owner:
                 return
-            await event.reply(f"{CFG_EMOJI} Перезапуск KoliUB...")
-            logger.info("🔄 Перезапуск...")
+            await event.reply(f"{CFG_EMOJI} 🔄 Перезапуск KoliUB...")
+            logger.info("🔄 Перезапуск KoliUB")
             await self.client.disconnect()
             os.execl(sys.executable, sys.executable, *sys.argv)
         
-        # Команда репо
         @self.client.on(events.NewMessage(pattern=f'^{self.prefix}репо$'))
         async def repo_cmd(event):
             if event.sender_id != self.owner:
@@ -204,8 +209,13 @@ class KoliBot:
             await event.reply(f"""
 **📦 KoliUB Repository**
 
-🔗 **GitHub:** {REPO_URL}
+🔗 **GitHub:** {self.repo_url}
 👑 **Author:** {AUTHOR}
 ⭐ **Star** на GitHub если нравится!
 
-**Установка:**
+**Быстрая установка:**
+```bash
+git clone {self.repo_url}
+cd KoliUserbot
+pip install -r requirements.txt
+python main.py

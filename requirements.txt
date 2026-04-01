@@ -1,6 +1,0 @@
-aiohttp
-telethon
-psutil
-python-dotenv
-requests
-pillow

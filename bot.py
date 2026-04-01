@@ -13,7 +13,6 @@ import subprocess
 from datetime import datetime
 from telethon import TelegramClient, errors
 from telethon.sessions import StringSession
-from telethon.tl.types import Message
 
 from config import *
 from database import Database
@@ -35,95 +34,163 @@ class KoliBot:
         self.version = KOLI_VERSION
         self.repo_url = REPO_URL
         self.loaded_modules = {}
+        self.api_id = None
+        self.api_hash = None
         
     async def start(self):
-        """Автоматическая авторизация"""
+        """Полная авторизация через терминал"""
         
-        # Создание клиента
-        if SESSION_STRING:
-            logger.info("🔑 Использование SESSION_STRING")
-            self.client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-            await self.client.start()
-            
+        print("\n" + "="*60)
+        print("🔐 АВТОРИЗАЦИЯ KOLIUB")
+        print("="*60)
+        
+        # 1. Запрашиваем API ID
+        print("\n📝 Получить API ID и API HASH можно на:")
+        print("   https://my.telegram.org/apps")
+        print("="*60)
+        
+        while not self.api_id:
             try:
-                self.user = await self.client.get_me()
-                logger.info(f"✅ Авторизован: {self.user.first_name} (@{self.user.username})")
-                return
-            except Exception as e:
-                logger.error(f"❌ Невалидная SESSION_STRING: {e}")
-                logger.info("🔄 Создаем новую сессию...")
+                api_id_input = input("🆔 Введите API ID: ").strip()
+                if api_id_input.isdigit():
+                    self.api_id = int(api_id_input)
+                else:
+                    print("❌ API ID должен быть числом!")
+            except KeyboardInterrupt:
+                print("\n👋 Выход...")
+                sys.exit(0)
         
-        # Если нет сессии или она невалидна
-        logger.info("📁 Создание новой сессии")
-        self.client = TelegramClient("koli_session", API_ID, API_HASH)
+        # 2. Запрашиваем API HASH
+        while not self.api_hash:
+            api_hash_input = input("🔑 Введите API HASH: ").strip()
+            if api_hash_input and len(api_hash_input) >= 30:
+                self.api_hash = api_hash_input
+            else:
+                print("❌ API HASH должен быть строкой из 30+ символов!")
         
-        # Запрашиваем номер телефона
-        print("\n" + "="*50)
-        print("🔐 АВТОРИЗАЦИЯ В TELEGRAM")
-        print("="*50)
-        print("Для авторизации вам потребуется:")
-        print("1. Номер телефона")
-        print("2. Код из Telegram")
-        print("3. Пароль 2FA (если включен)")
-        print("="*50)
+        # 3. Запрашиваем номер телефона
+        print("\n" + "="*60)
+        print("📱 АВТОРИЗАЦИЯ В TELEGRAM")
+        print("="*60)
         
-        phone = input("\n📱 Введите номер телефона (в формате +79991234567): ").strip()
+        phone = None
+        while not phone:
+            phone = input("📱 Введите номер телефона (+79991234567): ").strip()
+            if not phone:
+                print("❌ Номер телефона обязателен!")
+        
+        # Создаем клиент с введенными данными
+        self.client = TelegramClient("koli_session", self.api_id, self.api_hash)
         
         try:
             # Отправляем запрос на код
             await self.client.send_code_request(phone)
-            print("✅ Код отправлен в Telegram")
+            print("✅ Код подтверждения отправлен в Telegram!")
             
-            # Запрашиваем код
-            code = input("🔐 Введите код из Telegram: ").strip()
+            # 4. Запрашиваем код
+            code = None
+            while not code:
+                code = input("🔐 Введите код из Telegram: ").strip()
+                if not code:
+                    print("❌ Код не может быть пустым!")
             
             # Пытаемся войти
             try:
                 await self.client.sign_in(phone, code)
-                logger.info("✅ Авторизация успешна!")
                 
             except errors.SessionPasswordNeededError:
-                # Если требуется облачный пароль (2FA)
-                print("\n🔒 Требуется облачный пароль (2FA)")
-                password = input("🔒 Введите пароль: ").strip()
+                # 5. Запрашиваем 2FA пароль
+                print("\n🔒 Обнаружена двухфакторная аутентификация (2FA)")
+                password = None
+                while not password:
+                    password = input("🔒 Введите облачный пароль: ").strip()
+                    if not password:
+                        print("❌ Пароль не может быть пустым!")
+                
                 await self.client.sign_in(password=password)
-                logger.info("✅ Авторизация с 2FA успешна!")
             
             # Получаем информацию о пользователе
             self.user = await self.client.get_me()
-            logger.info(f"👤 Добро пожаловать, {self.user.first_name}!")
             
-            # Сохраняем SESSION_STRING
+            print("\n" + "="*60)
+            print(f"✅ ДОБРО ПОЖАЛОВАТЬ, {self.user.first_name.upper()}!")
+            print("="*60)
+            print(f"👤 Имя: {self.user.first_name}")
+            print(f"🆔 ID: {self.user.id}")
+            print(f"📱 Username: @{self.user.username if self.user.username else 'Нет'}")
+            
+            # 6. Запрашиваем OWNER_ID
+            print("\n" + "="*60)
+            print("⚙️ НАСТРОЙКА ВЛАДЕЛЬЦА")
+            print("="*60)
+            print(f"Ваш Telegram ID: {self.user.id}")
+            
+            owner_input = input(f"👑 Введите ID владельца (Enter = {self.user.id}): ").strip()
+            if owner_input and owner_input.isdigit():
+                self.owner = int(owner_input)
+            else:
+                self.owner = self.user.id
+            
+            # 7. Запрашиваем префикс
+            prefix_input = input(f"🔧 Введите префикс команд (Enter = {PREFIX}): ").strip()
+            if prefix_input:
+                self.prefix = prefix_input
+            
+            # Сохраняем настройки в .env
+            self.save_config()
+            
+            # Показываем SESSION_STRING
             session_str = self.client.session.save()
             print("\n" + "="*60)
-            print("📝 СОХРАНИТЕ ЭТУ СТРОКУ:")
+            print("📝 СОХРАНИТЕ ЭТУ СТРОКУ (SESSION_STRING):")
             print("="*60)
             print(f"\033[92m{session_str}\033[0m")
             print("="*60)
-            print("💾 Добавьте её в .env файл:")
-            print(f"SESSION_STRING={session_str}")
-            print(f"🔗 Репозиторий: {self.repo_url}")
             
-            # Автосохранение
-            save = input("\n💾 Автосохранить в .env? (y/n): ").lower()
-            if save == 'y':
-                self.save_session(session_str)
+            # Сохраняем сессию в .env
+            self.save_session(session_str)
+            
+            print("\n✅ Авторизация завершена!")
+            print(f"🚀 KoliUB готов к работе! Префикс: {self.prefix}")
             
         except errors.PhoneCodeInvalidError:
-            logger.error("❌ Неверный код подтверждения")
+            print("❌ Неверный код подтверждения!")
             sys.exit(1)
         except errors.PhoneCodeExpiredError:
-            logger.error("❌ Код истек, запросите новый")
+            print("❌ Код истек! Запросите новый.")
             sys.exit(1)
         except errors.FloodWaitError as e:
-            logger.error(f"❌ Слишком много попыток. Подождите {e.seconds} секунд")
+            print(f"❌ Слишком много попыток! Подождите {e.seconds} секунд.")
             sys.exit(1)
         except Exception as e:
-            logger.error(f"❌ Ошибка авторизации: {e}")
+            print(f"❌ Ошибка: {e}")
             sys.exit(1)
     
+    def save_config(self):
+        """Сохраняет API ID и HASH в .env"""
+        env_file = ".env"
+        env_vars = {}
+        
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if '=' in line and not line.startswith('#'):
+                        key, val = line.strip().split('=', 1)
+                        env_vars[key] = val
+        
+        env_vars['API_ID'] = str(self.api_id)
+        env_vars['API_HASH'] = self.api_hash
+        env_vars['PREFIX'] = self.prefix
+        env_vars['OWNER_ID'] = str(self.owner)
+        
+        with open(env_file, 'w') as f:
+            for key, val in env_vars.items():
+                f.write(f"{key}={val}\n")
+        
+        print(f"✅ Конфигурация сохранена в {env_file}")
+    
     def save_session(self, session_string):
-        """Сохраняет сессию в .env"""
+        """Сохраняет SESSION_STRING в .env"""
         env_file = ".env"
         env_vars = {}
         
@@ -140,7 +207,7 @@ class KoliBot:
             for key, val in env_vars.items():
                 f.write(f"{key}={val}\n")
         
-        logger.info(f"✅ SESSION_STRING сохранен в {env_file}")
+        print(f"✅ SESSION_STRING сохранен в {env_file}")
     
     async def load_handlers(self):
         """Загрузка всех обработчиков"""
@@ -232,5 +299,19 @@ class KoliBot:
 ```bash
 git clone {self.repo_url}
 cd KoliUserbot
-pip install -r requirements.txt
-python3 main.py
+python3 main.py    """)
+
+logger.info(f"{CFG_EMOJI} KoliUB готов! Префикс: {self.prefix}")
+
+# Отправка приветствия владельцу
+try:
+    await self.client.send_message(self.owner, 
+        f"{CFG_EMOJI} **KoliUB v{self.version} запущен!**\n\n"
+        f"👤 Аккаунт: {self.user.first_name}\n"
+        f"🔧 Префикс: `{self.prefix}`\n"
+        f"📝 Команда помощи: `{self.prefix}хелп`")
+except:
+    pass
+
+await self.client.run_until_disconnected()
+

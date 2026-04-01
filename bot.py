@@ -313,3 +313,67 @@ except:
     pass
 
 await self.client.run_until_disconnected()
+
+
+## А также нужно создать `menus.py` (был пустой):
+
+```python
+"""
+KoliUB - Интерактивные меню
+"""
+
+import logging
+from datetime import datetime
+from telethon import events
+from telethon.tl.custom import Button
+
+logger = logging.getLogger(__name__)
+
+async def register_menus(client, prefix, owner_id, db, cfg_emoji, bot):
+    """Регистрация меню"""
+    
+    @client.on(events.NewMessage(pattern=f'{prefix}меню$'))
+    async def main_menu(event):
+        if event.sender_id != owner_id:
+            return
+        
+        buttons = [
+            [Button.inline("⚙️ Настройки", b"settings")],
+            [Button.inline("📦 Модули", b"modules")],
+            [Button.inline("ℹ️ Инфо", b"info")],
+            [Button.inline("❌ Закрыть", b"close")]
+        ]
+        
+        await event.reply(
+            f"{cfg_emoji} **Главное меню KoliUB**\n\n"
+            f"👤 Аккаунт: {bot.user.first_name}\n"
+            f"🔧 Префикс: `{prefix}`",
+            buttons=buttons
+        )
+    
+    @client.on(events.CallbackQuery)
+    async def callback_handler(event):
+        if event.sender_id != owner_id:
+            await event.answer("⛔ Доступ запрещен", alert=True)
+            return
+        
+        data = event.data.decode()
+        
+        if data == "settings":
+            await event.edit("⚙️ Настройки (в разработке)")
+        elif data == "modules":
+            await event.edit("📦 Модули (в разработке)")
+        elif data == "info":
+            uptime = datetime.now() - bot.start_time
+            await event.edit(
+                f"ℹ️ **О KoliUB**\n\n"
+                f"📦 Версия: v{bot.version}\n"
+                f"👤 Аккаунт: {bot.user.first_name}\n"
+                f"⏱️ Аптайм: {uptime.days}д {uptime.seconds//3600}ч\n"
+                f"👑 Автор: @zxbruh\n"
+                f"🔗 GitHub: {bot.repo_url}"
+            )
+        elif data == "close":
+            await event.delete()
+    
+    logger.info("📋 Меню загружены")

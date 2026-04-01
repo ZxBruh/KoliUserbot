@@ -9,9 +9,8 @@ import logging
 import sys
 import os
 import time
-import subprocess
 from datetime import datetime
-from telethon import TelegramClient, errors
+from telethon import TelegramClient, events, errors
 from telethon.sessions import StringSession
 
 from config import *
@@ -132,7 +131,7 @@ class KoliBot:
                 self.owner = self.user.id
             
             # 7. Запрашиваем префикс
-            prefix_input = input(f"🔧 Введите префикс команд (Enter = {PREFIX}): ").strip()
+            prefix_input = input(f"🔧 Введите префикс команд (Enter = {self.prefix}): ").strip()
             if prefix_input:
                 self.prefix = prefix_input
             
@@ -314,4 +313,3 @@ except:
     pass
 
 await self.client.run_until_disconnected()
-

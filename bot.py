@@ -218,7 +218,7 @@ class KoliBot:
 git clone {self.repo_url}
 cd KoliUserbot
 pip install -r requirements.txt
-python main.py
+python main.py """)
 
 
 @self.client.on(events.NewMessage(pattern=f'^{self.prefix}обнова$'))

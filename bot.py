@@ -240,7 +240,7 @@ class KoliBot:
             minutes = (uptime.seconds % 3600) // 60
             
             status = f"""
-{CFG_EMOJI} **KoliUB v{self.version}**
+{cfg_emoji} **KoliUB v{self.version}**
 
 👤 **Аккаунт:** {self.user.first_name}
 🆔 **ID:** `{self.user.id}`
@@ -278,7 +278,7 @@ class KoliBot:
         async def restart_cmd(event):
             if event.sender_id != self.owner:
                 return
-            await event.reply(f"{CFG_EMOJI} 🔄 Перезапуск KoliUB...")
+            await event.reply(f"{cfg_emoji} 🔄 Перезапуск KoliUB...")
             logger.info("🔄 Перезапуск KoliUB")
             await self.client.disconnect()
             os.execl(sys.executable, sys.executable, *sys.argv)
@@ -300,18 +300,18 @@ git clone {self.repo_url}
 cd KoliUserbot
 python3 main.py    """)
 
-logger.info(f"{CFG_EMOJI} KoliUB готов! Префикс: {self.prefix}")
+logger.info(f"{cfg_emoji} KoliUB готов! Префикс: {self.prefix}")
 
 # Отправка приветствия владельцу
 try:
-    await self.client.send_message(self.owner, 
-        f"{CFG_EMOJI} **KoliUB v{self.version} запущен!**\n\n"
+    await self.client.send_message(
+        self.owner,
+        f"{cfg_emoji} **KoliUB v{self.version} запущен!**\n\n"
         f"👤 Аккаунт: {self.user.first_name}\n"
         f"🔧 Префикс: `{self.prefix}`\n"
-        f"📝 Команда помощи: `{self.prefix}хелп`")
+        f"📝 Команда помощи: `{self.prefix}хелп`"
+    )
 except:
     pass
 
 await self.client.run_until_disconnected()
-
-

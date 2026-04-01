@@ -317,7 +317,7 @@ await self.client.run_until_disconnected()
 
 ## А также нужно создать `menus.py` (был пустой):
 
-```python
+``python
 """
 KoliUB - Интерактивные меню
 """

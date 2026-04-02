@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-import asyncio, logging, sys, os
+import asyncio, logging, sys
 from telethon import TelegramClient
-from dotenv import load_dotenv
-load_dotenv()
-from config import *
-from database import Database
 from bot import KoliBot
 
 logging.basicConfig(format='[%(levelname)s] %(asctime)s - %(name)s: %(message)s', level=logging.INFO)
@@ -16,7 +12,6 @@ async def main():
     print(BANNER)
     bot = KoliBot()
     await bot.start()
-    await bot.load_handlers()
     await bot.run()
 
 if __name__ == "__main__":
